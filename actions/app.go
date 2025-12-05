@@ -1,21 +1,14 @@
 package actions
 
 import (
+	"github.com/gobuffalo/middleware/csrf"
 	"net/http"
+	"os"
 	"sync"
 
-	"buffalo-go-web-hello/locales"
-	"buffalo-go-web-hello/models"
-	"buffalo-go-web-hello/public"
-
 	"github.com/gobuffalo/buffalo"
-	"github.com/gobuffalo/buffalo-pop/v3/pop/popmw"
 	"github.com/gobuffalo/envy"
-	"github.com/gobuffalo/middleware/csrf"
-	"github.com/gobuffalo/middleware/forcessl"
 	"github.com/gobuffalo/middleware/i18n"
-	"github.com/gobuffalo/middleware/paramlogger"
-	"github.com/unrolled/secure"
 )
 
 // ENV is used to help switch settings based on where the
@@ -28,71 +21,34 @@ var (
 	T       *i18n.Translator
 )
 
-// App is where all routes and middleware for buffalo
-// should be defined. This is the nerve center of your
-// application.
-//
-// Routing, middleware, groups, etc... are declared TOP -> DOWN.
-// This means if you add a middleware to `app` *after* declaring a
-// group, that group will NOT have that new middleware. The same
-// is true of resource declarations as well.
-//
-// It also means that routes are checked in the order they are declared.
-// `ServeFiles` is a CATCH-ALL route, so it should always be
-// placed last in the route declarations, as it will prevent routes
-// declared after it to never be called.
+func HelloHandler(c buffalo.Context) error {
+	return c.Render(http.StatusOK, r.JSON(map[string]string{
+		"message": "Hello from Buffalo Nano-App!",
+	}))
+}
+
 func App() *buffalo.App {
-	appOnce.Do(func() {
-		app = buffalo.New(buffalo.Options{
-			Env:         ENV,
-			SessionName: "_buffalo_go_web_hello_session",
-		})
-
-		// Automatically redirect to SSL
-		app.Use(forceSSL())
-
-		// Log request parameters (filters apply).
-		app.Use(paramlogger.ParameterLogger)
-
-		// Protect against CSRF attacks. https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)
-		// Remove to disable this.
-		app.Use(csrf.New)
-
-		// Wraps each request in a transaction.
-		//   c.Value("tx").(*pop.Connection)
-		// Remove to disable this.
-		app.Use(popmw.Transaction(models.DB))
-		// Setup and use translations:
-		app.Use(translations())
-
-		app.GET("/", HomeHandler)
-
-		app.ServeFiles("/", http.FS(public.FS())) // serve files from the public directory
+	err := os.Setenv("WEBPACK_MANIFEST", "public/assets/manifest.json")
+	if err != nil {
+		print("Could not set manifest pah", err)
+	}
+	app := buffalo.New(buffalo.Options{
+		Env:         ENV,
+		SessionName: "_buffalo_go_web_hello_session",
 	})
+
+	// Serve static files
+	//app.ServeFiles("/assets", http.FS(public.FS()))
+	app.ServeFiles("/assets", http.Dir("public/assets"))
+
+	app.GET("/.well-known/appspecific/com.chrome.devtools.json/", func(c buffalo.Context) error {
+		return c.Render(200, r.String("{}"))
+	})
+
+	app.GET("/", HomeHandler)
+	app.GET("/api/hello", HelloHandler)
+
+	app.Use(csrf.New)
 
 	return app
-}
-
-// translations will load locale files, set up the translator `actions.T`,
-// and will return a middleware to use to load the correct locale for each
-// request.
-// for more information: https://gobuffalo.io/en/docs/localization
-func translations() buffalo.MiddlewareFunc {
-	var err error
-	if T, err = i18n.New(locales.FS(), "en-US"); err != nil {
-		app.Stop(err)
-	}
-	return T.Middleware()
-}
-
-// forceSSL will return a middleware that will redirect an incoming request
-// if it is not HTTPS. "http://example.com" => "https://example.com".
-// This middleware does **not** enable SSL. for your application. To do that
-// we recommend using a proxy: https://gobuffalo.io/en/docs/proxy
-// for more information: https://github.com/unrolled/secure/
-func forceSSL() buffalo.MiddlewareFunc {
-	return forcessl.Middleware(secure.Options{
-		SSLRedirect:     ENV == "production",
-		SSLProxyHeaders: map[string]string{"X-Forwarded-Proto": "https"},
-	})
 }
